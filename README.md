@@ -1,2 +1,2 @@
 # skills2job 
-using skills2vec and U.S. Technology Jobs on Dice.com
+using python 3.9.13, skills2vec and U.S. Technology Jobs on Dice.com
