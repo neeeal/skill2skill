@@ -1,4 +1,5 @@
 import requests
+requests.adapters.DEFAULT_RETRIES = 15 # increase retries number
 import csv
 import nltk
 import re
@@ -16,8 +17,12 @@ def soup_loader(url):
     headers = {
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.111 Safari/537.36'
         }
-    response = requests.get(url, timeout=30, headers=headers )
+    response = requests.get(url, 
+                            timeout=180, 
+                            headers=headers, 
+                            )
     soup = BeautifulSoup(response.text,  "html.parser")
+    response.close()
     return soup, response.status_code
 
 def get_categories(soup):
@@ -54,14 +59,10 @@ def get_job_descriptions(soup, stop_words = stopwords.words('english')):
     ## Applying NLP: lowercase, remove non-alphanum, remove stopwords
     descriptions = [description.text for description in soup.find_all(class_='job-summary-full p-reg-100 sc-dhi-job-search-job-card-layout-full')] 
     for n,desc in enumerate(descriptions):
-        temp = re.sub(r"[^ a-zA-Z]+",'', desc).lower().split(' ')
+        temp = re.sub(r"[^ a-zA-Z]+",' ', desc).lower().split(' ')
         temp = [word for word in temp if word not in stop_words if len(word) > 1]
         descriptions[n] = ' '.join(temp)
-    # descriptions = array(descriptions)
-    return descriptions
-
-def random_sleep():
-    sleep(rand(1)[0]*5)
+    return ' '.join(descriptions)
 
 def run_scraper(file):
 
@@ -79,7 +80,8 @@ def run_scraper(file):
     ## Initializing contiainers
     jobs_descriptions=[]
     job_titles=[]
-
+    base=100
+    key=1
     for category in categories_links:
         try:
             print('Category:', category)
@@ -94,65 +96,60 @@ def run_scraper(file):
             
             ## Generating job links
             job_titles_links = get_job_links(job_titles_in_category)
-
+            
             for l,job_link in enumerate(job_titles_links): ## remove l after testing
                 print(' Job Link:',job_link)
+                job_link_descriptions = []
                 
                 ## Loading content of job title link
                 job_title_soup,status = soup_loader(job_link)
 
-                ## Retrieving job descriptions
-                job_link_descriptions = get_job_descriptions(job_title_soup)
-                
                 ## Getting number of pages
                 num_pages = get_num_pages(job_title_soup)
-                
+                n=1; key+=1
                 print(f'       {1} out of {num_pages} pages processed')
                 if num_pages == 1: 
-                    jobs_descriptions += [job_link_descriptions]
+                    jobs_descriptions.append({'job_id':file*base+key,'job_title':job_titles[l],'job_description':get_job_descriptions(job_title_soup)})
                     print('       Only 1 page'); continue ## Next job title if only one page
                 
+                job_link_descriptions+= get_job_descriptions(job_title_soup)
                 ## Generating pagination links
                 page_links = get_page_links(num_pages, job_link)
-
+                
                 ## Getting job descriptions for page>1 in job title listing
-                for n,page_link in enumerate(page_links):
-                    if randint(low=0,high=10,size=1)>7:random_sleep() ## RANDOM SLEEPING
+                for page_link in page_links:
 
                     ## Loading content of job title link
                     job_title_soup,status = soup_loader(page_link)
 
                     ## Retrieving job descriptions
-                    job_link_descriptions += f' {get_job_descriptions(job_title_soup)}'
+                    job_link_descriptions += get_job_descriptions(job_title_soup)
                     
-                    print(f'       {n+2} out of {num_pages} pages processed')
-                    # if n+1 == 3: break ## Testing code for pages 2-4
+                    print(f'       {n+1} out of {num_pages} pages processed')
+                    ## Hard limiting number of jobs to scrape 
+                    # if len(job_link_descriptions) > 20: jobs_descriptions = jobs_descriptions + [job_link_descriptions[:20]]
+                    # else: jobs_descriptions = jobs_descriptions + [job_link_descriptions]
+                    n+=1
                     # break
+                    if n == 49: break ## Getting a maximum (n+1)*20 number of job description per title
+                jobs_descriptions.append({'job_id':file*base+key,'job_title':job_titles[l],'job_description':get_job_descriptions(job_title_soup)})
+                # jobs_descriptions.append([job_titles[l],job_link_descriptions])
                 # break
-                ## Hard limiting number of jobs to scrape 
-                if len(job_link_descriptions) > 20: jobs_descriptions = jobs_descriptions +[job_link_descriptions[:20]]
-                else: jobs_descriptions = jobs_descriptions +job_link_descriptions
-                
-                # if l > 2 : break ## Testing code for 4 jobs
+                if l == 49 : break ## Testing code for 10 jobs
             # break ## Testing code
         except Exception as e:
             print(e)
 
-
-
     ## Saving as CSV
-    with open(f'datasets//dice_jobs_{str(file)}.csv', 'w') as f:
-        
-        # using csv.writer method from CSV package
-        write = csv.writer(f)
-        
-        write.writerow(job_titles) ## columns
-        write.writerow(jobs_descriptions) ## rows
+    fieldnames = ['job_id','job_title','job_description']
+    with open(f'datasets//dice_jobs_{str(file)}.csv', 'w') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(jobs_descriptions)
 
-  
-  
+
 if __name__ == '__main__': 
     pool = multiprocessing.Pool() 
     result_async = [pool.apply_async(run_scraper, args = (i,)) for i in range(26)]
     results = [r.get() for r in result_async] 
-    # print("Output: {}".format(results)) 
+    print("Output: {}".format(results)) 
